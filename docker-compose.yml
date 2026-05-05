@@ -1,0 +1,466 @@
+version: '3.8'
+
+# Настройки
+x-common-spark-env: &common-spark-env
+  SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+  SPARK_RPC_ENCRYPTION_ENABLED: "no"
+  SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+  SPARK_SSL_ENABLED: "no"
+  HADOOP_CONF_DIR: "/opt/hadoop/conf"
+  PYSPARK_PYTHON: "python3"
+  PYSPARK_DRIVER_PYTHON: "python3"
+
+x-common-extra-hosts: &common-extra-hosts
+  - "shnamenode:172.22.0.2"
+  - "shdatanode:172.22.0.3"
+  - "shspark-master:172.22.0.4"
+  - "shspark-worker-1:172.22.0.5"
+  - "shspark-worker-2:172.22.0.6"
+  - "shjupyter:172.22.0.7"
+  - "shminio:172.22.0.8"
+  - "shzookeeper:172.22.0.9"      
+  - "shkafka:172.22.0.10"         
+  - "shkafka-connect:172.22.0.11" 
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+networks:
+  hadoop-spark-network:
+    driver: bridge
+    name: spark_hdfs_hadoop-spark-network
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+          gateway: 172.22.0.1
+
+services:
+  # ============ MINIO ============
+  minio:
+    image: minio/minio:latest
+    container_name: shminio
+    hostname: shminio
+    ports:
+      - "9005:9302"         # API
+      - "9006:9303"         # Web UI
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      MINIO_DOMAIN: "minio.local"
+    volumes:
+      - minio_data:/data
+      - ./minio-config:/root/.minio:ro
+    command: server /data --console-address ":9303" --address ":9302"
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.8
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+
+  # hadoop namenode
+  namenode:
+    build:
+      context: .
+      dockerfile: Dockerfile.hadoop
+    image: spark_hdfs-hadoop:latest
+    container_name: shnamenode
+    hostname: shnamenode
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/data
+      - ./hadoop-config/hdfs-site-namenode.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./hadoop-config/core-site-namenode.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+    environment:
+      CLUSTER_NAME: "test-cluster"
+      HADOOP_HEAPSIZE: "1024"
+    env_file: .env
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.2
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    command: ["/usr/local/bin/start-namenode.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  # hadoop datanode
+  datanode:
+    build:
+      context: .
+      dockerfile: Dockerfile.hadoop
+    image: spark_hdfs-hadoop:latest
+    container_name: shdatanode
+    hostname: shdatanode
+    ports:
+      - "9864:9864"
+      - "9866:9866"
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+      - ./data:/data
+      - ./hadoop-config/hdfs-site-datanode.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./hadoop-config/core-site-datanode.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+    environment:
+      HADOOP_HEAPSIZE: "1024"
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.3
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:
+      namenode:
+        condition: service_healthy
+    command: ["/usr/local/bin/start-datanode.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9864"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # spark-master
+  spark-master:
+    build: 
+      context: .
+      dockerfile: Dockerfile.spark
+    image: spark_hdfs-spark:latest
+    container_name: shspark-master
+    hostname: shspark-master
+    ports:
+      - "${SPARK_MASTER_WEBUI_PORT:-8080}:8080"
+      - "${SPARK_MASTER_PORT:-7077}:7077"
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - hadoop_namenode:/hadoop/dfs/name:ro
+      - ./hadoop-config/core-site.xml:/opt/hadoop/conf/core-site.xml:ro
+      - ./hadoop-config/hdfs-site.xml:/opt/hadoop/conf/hdfs-site.xml:ro
+      - ./jars:/jars:ro
+      - ./spark-config:/opt/spark/conf/
+    environment:
+      <<: *common-spark-env
+      SPARK_MODE: "master"
+      SPARK_MASTER_HOST: "172.22.0.4"
+      SPARK_MASTER_PORT: "${SPARK_MASTER_PORT:-7077}"
+      SPARK_NO_DAEMONIZE: "true"
+      # Настройки драйвера
+      SPARK_DRIVER_BIND_ADDRESS: "0.0.0.0"
+      SPARK_DRIVER_HOST: "shspark-master"
+      SPARK_LOCAL_IP: "172.22.0.4"
+      SPARK_PUBLIC_DNS: "shspark-master"
+      SPARK_MASTER_OPTS: "-Dspark.driver.host=shspark-master"
+    env_file: .env
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.4
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    command: ["/usr/local/bin/start-spark-master.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 120s 
+
+  # spark-worker
+  spark-worker-1:
+    build: 
+      context: .
+      dockerfile: Dockerfile.spark
+    image: spark_hdfs-spark:latest
+    container_name: shspark-worker-1
+    hostname: shspark-worker-1
+    ports:
+      - "8081:${SPARK_WORKER_WEBUI_PORT:-8081}"
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./hadoop-config/core-site.xml:/opt/hadoop/conf/core-site.xml:ro
+      - ./hadoop-config/hdfs-site.xml:/opt/hadoop/conf/hdfs-site.xml:ro
+      - ./jars:/jars:ro
+      - ./spark-config:/opt/spark/conf/
+    environment:
+      <<: *common-spark-env
+      SPARK_MODE: "worker"
+      SPARK_MASTER_URL: "spark://172.22.0.4:${SPARK_MASTER_PORT:-7077}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"       
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-2}"          
+      SPARK_EXECUTOR_MEMORY: "${SPARK_EXECUTOR_MEMORY:-2g}"   
+      SPARK_WORKER_WEBUI_PORT: "${SPARK_WORKER_WEBUI_PORT:-8081}"
+      SPARK_NO_DAEMONIZE: "true"
+    env_file: .env
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.5
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:
+      - spark-master 
+    command: ["/usr/local/bin/start-spark-worker.sh", "8081", "172.22.0.5"]
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: '2'
+        reservations:
+          memory: ${EXECUTOR_MEMORY:-1g}
+          cpus: '1'
+
+  # spark-worker
+  spark-worker-2:
+    build: 
+      context: .
+      dockerfile: Dockerfile.spark
+    image: spark_hdfs-spark:latest
+    container_name: shspark-worker-2
+    hostname: shspark-worker-2
+    ports:
+      - "8082:${SPARK_WORKER_WEBUI_PORT:-8081}"
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./hadoop-config/core-site.xml:/opt/hadoop/conf/core-site.xml:ro
+      - ./hadoop-config/hdfs-site.xml:/opt/hadoop/conf/hdfs-site.xml:ro
+      - ./jars:/jars:ro
+      - ./spark-config:/opt/spark/conf/
+    environment:
+      <<: *common-spark-env
+      SPARK_MODE: "worker"
+      SPARK_MASTER_URL: "spark://172.22.0.4:${SPARK_MASTER_PORT:-7077}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-2g}"       
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-2}"          
+      SPARK_EXECUTOR_MEMORY: "${SPARK_EXECUTOR_MEMORY:-2g}"   
+      SPARK_WORKER_WEBUI_PORT: "${SPARK_WORKER_WEBUI_PORT:-8081}"
+      SPARK_NO_DAEMONIZE: "true"
+    env_file: .env
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.6
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:
+      - spark-master 
+    command: ["/usr/local/bin/start-spark-worker.sh", "8081", "172.22.0.6"]
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: '2'
+        reservations:
+          memory: ${EXECUTOR_MEMORY:-1g}
+          cpus: '1'
+
+  # Jupyter
+  jupyter:
+    build: 
+      context: .
+      dockerfile: Dockerfile.jupyter
+    image: spark_hdfs-jupyter:latest
+    container_name: shjupyter
+    hostname: shjupyter
+    ports:
+      - "8888:8888"
+      #- "4040:4040"
+      - "4040-4050:4040-4050"
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data
+      - ./hadoop-config/core-site.xml:/etc/hadoop/core-site.xml:ro
+      - ./hadoop-config/hdfs-site.xml:/etc/hadoop/hdfs-site.xml:ro
+      - ./spark-config:/usr/local/spark/conf:ro
+      - ./jars:/jars:ro
+    environment:
+      JUPYTER_TOKEN: "${JUPYTER_TOKEN:-etl2024}"
+      SPARK_MASTER: "spark://172.22.0.4:${SPARK_MASTER_PORT:-7077}"
+      SPARK_DRIVER_MEMORY: "${DRIVER_MEMORY:-2g}"
+      SPARK_EXECUTOR_MEMORY: "${EXECUTOR_MEMORY:-2g}"
+      SPARK_EXECUTOR_CORES: "${EXECUTOR_CORES:-2}"
+      PYSPARK_PYTHON: "python3"
+      PYSPARK_DRIVER_PYTHON: "python3"
+      PYTHONPATH: "/app/src"
+      HADOOP_CONF_DIR: "/etc/hadoop"
+      JAVA_HOME: "/usr/lib/jvm/java-11-openjdk-amd64"
+      SPARK_HOME: "/usr/local/spark"
+      SPARK_DRIVER_BIND_ADDRESS: "0.0.0.0"
+      SPARK_DRIVER_HOST: "shjupyter"
+      SPARK_LOCAL_IP: "172.22.0.7"
+    env_file: .env
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.7
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:
+      - spark-master 
+    command: ["/usr/local/bin/start-jupyter.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 70s
+# Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: shzookeeper
+    hostname: shzookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 5
+      ZOOKEEPER_INIT_LIMIT: 10
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "ruok, srvr, stat, mntr, conf" 
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.9
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    healthcheck:
+      #test: ["CMD", "bash", "-c", "echo 'ruok' | nc -w 2 localhost 2181 | grep imok"]
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep -q 'Zookeeper version'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+# KAFKA
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: shkafka
+    hostname: shkafka
+    ports:
+      - "9092:9092"      # Внешний доступ (для тестов с хоста)
+      - "29092:29092"    # Внутренний доступ (для контейнеров)
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "shzookeeper:2181"
+      KAFKA_LISTENERS: "INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://shkafka:29092,EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.10
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:                   
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:29092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+  #kafka-connect
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:7.6.0
+    container_name: shkafka-connect
+    hostname: shkafka-connect
+    ports:
+      - "8083:8083"      # REST API для управления коннекторами
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "shkafka:29092"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "shkafka-connect"
+      CONNECT_GROUP_ID: "sh-connect-cluster"
+      CONNECT_CONFIG_STORAGE_TOPIC: "sh-connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "sh-connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "sh-connect-status"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+      CONNECT_LOG4J_LOGGERS: "org.reflections=ERROR"
+      # Доступ к MinIO (S3-compatible)
+      CONNECT_S3_ACCESS_KEY_ID: "minioadmin"
+      CONNECT_S3_SECRET_ACCESS_KEY: "minioadmin"
+      AWS_ACCESS_KEY_ID: "minioadmin"
+      AWS_SECRET_ACCESS_KEY: "minioadmin"
+      CONNECT_CONNECTOR_CLIENT_POLICY: "All"
+    volumes:
+      - ./kafka-connect-plugins:/usr/share/confluent-hub-components
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.11
+    extra_hosts: *common-extra-hosts
+    logging: *default-logging
+    restart: unless-stopped
+    depends_on:
+      - kafka
+      - minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: shkafka-ui
+    ports:
+      - "8084:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: shkafka:29092
+    networks:
+      hadoop-spark-network:
+        ipv4_address: 172.22.0.12
+    extra_hosts: *common-extra-hosts
+    restart: unless-stopped
+    
+  
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  minio_data:
+  zookeeper_data:      
+  zookeeper_log:       
+  kafka_data:          

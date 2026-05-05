@@ -1,0 +1,19 @@
+<configuration>
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://172.22.0.2:9000</value>
+    </property>
+    <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/tmp/hadoop</value>
+    </property>
+    <property>
+        <name>hadoop.security.token.service.use_ip</name>
+        <value>true</value>
+    </property>
+    <!-- Дополнительно для лучшей работы -->
+    <property>
+        <name>ipc.client.fallback-to-simple-auth-allowed</name>
+        <value>true</value>
+    </property>
+</configuration>

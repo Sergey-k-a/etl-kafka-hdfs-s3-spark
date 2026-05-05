@@ -1,0 +1,36 @@
+{
+  "name": "s3-sink-connector",
+  "config": {
+    "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+    "tasks.max": "1",
+    
+    "topics": "ecommerce.user.events",
+    
+    "s3.bucket.name": "bronze",
+    "s3.region": "us-east-1",
+    
+    "s3.part.size": "26214400",
+    "flush.size": "500",
+    "rotate.interval.ms": "120000",
+    
+    "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+    "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
+    "partitioner.class": "io.confluent.connect.storage.partitioner.DefaultPartitioner",
+    
+    "schema.compatibility": "NONE",
+    
+    "store.url": "http://shminio:9302",
+    "s3.path.style.access": "true",
+    
+    "aws.access.key.id": "minioadmin",
+    "aws.secret.access.key": "minioadmin",
+    
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+    <!-- HDFS Configuration -->
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://172.22.0.2:9000</value>
+    </property>
+    <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/tmp/hadoop</value>
+    </property>
+    <property>
+        <name>hadoop.security.token.service.use_ip</name>
+        <value>true</value>
+    </property>
+    
+    <!-- Дополнительно для лучшей работы -->
+    <property>
+        <name>ipc.client.fallback-to-simple-auth-allowed</name>
+        <value>true</value>
+    </property>
+    
+    <!-- ========== MinIO/S3 Configuration ========== -->
+    <!-- MinIO Endpoint Configuration -->
+    <property>
+        <name>fs.s3a.endpoint</name>
+        <value>http://shminio:9302</value>
+    </property>
+    <property>
+        <name>fs.s3a.access.key</name>
+        <value>minioadmin</value>
+    </property>
+    <property>
+        <name>fs.s3a.secret.key</name>
+        <value>minioadmin</value>
+    </property>
+    
+    <!-- S3A FileSystem Implementation -->
+    <property>
+        <name>fs.s3a.impl</name>
+        <value>org.apache.hadoop.fs.s3a.S3AFileSystem</value>
+    </property>
+    
+    <!-- Path Style Access (required for MinIO) -->
+    <property>
+        <name>fs.s3a.path.style.access</name>
+        <value>true</value>
+    </property>
+    
+    <!-- SSL Disabled (MinIO по умолчанию без SSL) -->
+    <property>
+        <name>fs.s3a.connection.ssl.enabled</name>
+        <value>false</value>
+    </property>
+    
+    <!-- AWS Credentials Provider -->
+    <property>
+        <name>fs.s3a.aws.credentials.provider</name>
+        <value>org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider</value>
+    </property>
+    
+    <!-- Performance Tuning -->
+    <property>
+        <name>fs.s3a.connection.maximum</name>
+        <value>15</value>
+    </property>
+    <property>
+        <name>fs.s3a.fast.upload</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>fs.s3a.fast.upload.buffer</name>
+        <value>disk</value>
+    </property>
+    <property>
+        <name>fs.s3a.multipart.size</name>
+        <value>64M</value>
+    </property>
+    <property>
+        <name>fs.s3a.multipart.threshold</name>
+        <value>64M</value>
+    </property>
+    
+    <!-- Buffer Size -->
+    <property>
+        <name>io.file.buffer.size</name>
+        <value>131072</value>
+    </property>
+    
+    <!-- Enable S3A Filesystem -->
+    <property>
+        <name>fs.s3a.impl.disable.cache</name>
+        <value>false</value>
+    </property>
+</configuration>

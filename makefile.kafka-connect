@@ -1,0 +1,41 @@
+############################################################
+######Управление Kafka Connect
+############################################################
+
+# Зарегистрировать S3 Sink коннектор для ELT
+etl_streaming_connector_registration:
+	curl -X POST http://localhost:8083/connectors -H "Content-Type: application/json" -d @kafka-connect-config/s3-sink-connector.json
+
+# Удалить S3 Sink коннектор для ELT
+etl_streaming_connector_delete:
+	curl -X DELETE http://localhost:8083/connectors/s3-sink-connector
+
+# Восстановить коннектор s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_on:
+	curl -X PUT http://localhost:8083/connectors/s3-sink-connector/resume
+
+# Приостановка коннектора s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_pause:
+	curl -X PUT http://localhost:8083/connectors/s3-sink-connector/pause
+
+# Остановка коннектора s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_stop:
+	curl -X PUT http://localhost:8083/connectors/s3-sink-connector/stop
+
+# Список коннекторов s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_list:
+	curl -s http://localhost:8083/connectors/s3-sink-connector/| python -m json.tool
+
+# Статус коннектора s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_status:
+	curl -s http://localhost:8083/connectors/s3-sink-connector/status| python -m json.tool
+
+# offset коннектора s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_offset:
+	curl -s http://localhost:8083/connectors/s3-sink-connector/offsets | python -m json.tool
+
+# Сбросить offset коннектора s3-sink-connector для etl_streaming генерации
+etl_streaming_connector_broke_offset:
+	curl -X DELETE http://localhost:8083/connectors/s3-sink-connector/offsets
+
+       

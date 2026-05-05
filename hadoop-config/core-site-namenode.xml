@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property>
+        <name>fs.defaultFS</name>
+        <value>hdfs://172.22.0.2:9000</value>
+    </property>
+    <property>
+        <name>hadoop.tmp.dir</name>
+        <value>/tmp/hadoop</value>
+    </property>
+    
+    <!-- ПРИНУДИТЕЛЬНОЕ ИСПОЛЬЗОВАНИЕ IP -->
+    <property>
+        <name>hadoop.security.token.service.use_ip</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>hadoop.rpc.socket.factory.class.default</name>
+        <value>org.apache.hadoop.net.StandardSocketFactory</value>
+    </property>
+    <property>
+        <name>fs.hdfs.impl.disable.cache</name>
+        <value>true</value>
+    </property>
+</configuration>

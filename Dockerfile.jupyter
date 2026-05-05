@@ -1,0 +1,130 @@
+# syntax=docker/dockerfile:1
+
+# Стадия 1: Скачивание Spark
+FROM ubuntu:22.04 AS spark-downloader
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends wget ca-certificates && \
+    wget -q --retry-connrefused --waitretry=5 \
+        https://archive.apache.org/dist/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz \
+        -O /spark.tgz && \
+    test $(stat -c%s /spark.tgz) -gt 200000000
+
+# Стадия 2: Финальный образ
+FROM jupyter/base-notebook:python-3.9
+
+USER root
+
+# Системные зависимости
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        openjdk-11-jre-headless \
+        curl \
+        netcat-openbsd && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/cache/apt/*
+
+# Установка Spark с удалением лишнего
+COPY --from=spark-downloader /spark.tgz /tmp/spark.tgz
+RUN tar -xzf /tmp/spark.tgz -C /usr/local && \
+    mv /usr/local/spark-3.5.0-bin-hadoop3 /usr/local/spark && \
+    rm /tmp/spark.tgz && \
+    # Удаляем ненужные компоненты
+    rm -rf /usr/local/spark/examples \
+           /usr/local/spark/data \
+           /usr/local/spark/R \
+           /usr/local/spark/python/pyspark/examples \
+           /usr/local/spark/python/pyspark/tests \
+           /usr/local/spark/python/pyspark/streaming/tests \
+           /usr/local/spark/python/pyspark/ml/tests \
+           /usr/local/spark/python/pyspark/mllib/tests \
+           /usr/local/spark/python/pyspark/sql/tests \
+           /usr/local/spark/python/pyspark/pandas/tests \
+           /usr/local/spark/yarn \
+           /usr/local/spark/kubernetes \
+           /usr/local/spark/python/lib/py4j-*-src.zip \
+           /usr/local/spark/python/lib/pyspark.zip && \
+    # Удаляем документацию
+    find /usr/local/spark -name "*.md" -delete && \
+    find /usr/local/spark -name "*.txt" ! -path "*/LICENSE*" -delete && \
+    find /usr/local/spark -name "*.rst" -delete && \
+    mkdir -p /usr/local/spark/conf
+
+# Python пакеты с полной очисткой
+RUN pip install --no-cache-dir \
+    pyspark==3.5.0 \
+    pandas==2.0.3 \
+    numpy==1.24.3 \
+    matplotlib==3.7.2 \
+    seaborn==0.12.2 \
+    boto3 \
+    pyarrow==12.0.1 \
+    kafka-python \
+    confluent_kafka \
+    faker \
+    jupyterlab-git \
+    ipywidgets && \
+    pip cache purge && \
+    rm -rf /root/.cache/pip && \
+    rm -rf /home/jovyan/.cache/pip && \
+    rm -rf /tmp/* && \
+    find /opt/conda -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/conda -type f -name '*.pyc' -delete 2>/dev/null || true && \
+    find /opt/conda -type f -name '*.pyo' -delete 2>/dev/null || true && \
+    find /opt/conda -type d -name 'tests' -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/conda -type d -name 'test' -exec rm -rf {} + 2>/dev/null || true && \
+    find /opt/conda -type f -name '*.dist-info' -prune -o -type f -name 'RECORD' -delete 2>/dev/null || true && \
+    # Удаляем локали
+    find /opt/conda -type d -name 'locale' -exec sh -c 'cd {} && ls -d */ | grep -v -E "en|ru" | xargs rm -rf' \; 2>/dev/null || true && \
+    fix-permissions /opt/conda && \
+    fix-permissions /home/jovyan
+
+# Переменные окружения
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 \
+    SPARK_HOME=/usr/local/spark \
+    HADOOP_CONF_DIR=/etc/hadoop \
+    PATH=/usr/local/spark/bin:/opt/conda/bin:$PATH \
+    PYSPARK_PYTHON=python3 \
+    PYSPARK_DRIVER_PYTHON=python3 \
+    PYTHONPATH=/home/jovyan/work/src
+
+
+RUN mkdir -p /etc/hadoop
+
+# Копирование конфигураций
+COPY hadoop-config/core-site.xml /etc/hadoop/core-site.xml
+COPY hadoop-config/hdfs-site.xml /etc/hadoop/hdfs-site.xml
+COPY spark-config/spark-defaults.conf /usr/local/spark/conf/spark-defaults.conf
+
+# Настройка Spark defaults
+RUN echo "spark.hadoop.fs.defaultFS=hdfs://172.22.0.2:9000" >> /usr/local/spark/conf/spark-defaults.conf && \
+    echo "spark.hadoop.dfs.client.use.datanode.hostname=false" >> /usr/local/spark/conf/spark-defaults.conf && \
+    echo "spark.sql.adaptive.enabled=true" >> /usr/local/spark/conf/spark-defaults.conf && \
+    echo "spark.sql.adaptive.coalescePartitions.enabled=true" >> /usr/local/spark/conf/spark-defaults.conf
+
+# Настройка Jupyter
+RUN mkdir -p /home/jovyan/.jupyter && \
+    echo 'c.NotebookApp.token = "etl2024"' > /home/jovyan/.jupyter/jupyter_notebook_config.py && \
+    echo 'c.NotebookApp.ip = "0.0.0.0"' >> /home/jovyan/.jupyter/jupyter_notebook_config.py && \
+    echo 'c.NotebookApp.allow_root = True' >> /home/jovyan/.jupyter/jupyter_notebook_config.py && \
+    echo 'c.NotebookApp.open_browser = False' >> /home/jovyan/.jupyter/jupyter_notebook_config.py && \
+    echo 'c.LabApp.default_url = "/lab"' >> /home/jovyan/.jupyter/jupyter_notebook_config.py
+
+# Копирование скрипта запуска
+COPY scripts/start-jupyter.sh /usr/local/bin/start-jupyter.sh
+RUN chmod +x /usr/local/bin/start-jupyter.sh
+
+# Рабочая директория
+WORKDIR /home/jovyan/work
+
+# Создание рабочих директорий
+RUN mkdir -p /app/logs /app/data /app/notebooks && \
+    chown -R 1000:100 /app && \
+    # Финальная очистка
+    rm -rf /tmp/* /var/tmp/* /var/log/*
+
+# Пользователь
+USER 1000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8888/ || exit 1

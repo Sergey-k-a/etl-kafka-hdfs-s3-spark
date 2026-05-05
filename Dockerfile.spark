@@ -1,0 +1,67 @@
+FROM apache/spark:3.5.0
+
+USER root
+
+# Системные пакеты + Python 3.9
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget \
+        netcat-openbsd \
+        curl \
+        procps \
+        python3.9 \
+        python3.9-distutils \
+        python3-pip && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 1 && \
+    update-alternatives --set python3 /usr/bin/python3.9 && \
+    pip3 install --upgrade pip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/*
+
+
+RUN pip3 install --no-cache-dir --timeout 120 \
+    pyspark==3.5.0 \
+    numpy==1.24.3 \
+    pandas==2.0.3 \
+    boto3 \
+    python-dateutil==2.8.2 \
+    pyarrow==14.0.2 \
+    fastparquet==2023.10.1 \
+    kafka-python \
+    confluent-kafka \
+    faker \
+    pyyaml \
+    matplotlib \
+    seaborn \
+    python-json-logger==2.0.7
+
+# COPY requirements.txt /tmp/requirements.txt
+# RUN if [ -f /tmp/requirements.txt ]; then \
+#         pip3 install --no-cache-dir -r /tmp/requirements.txt; \
+#     fi && \
+#     rm /tmp/requirements.txt
+
+# Конфигурация Spark
+RUN mkdir -p /opt/spark/conf
+#COPY spark-config/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
+
+# Рабочие директории
+RUN mkdir -p /app/logs /app/data /tmp/spark-local && \
+    chown -R spark:spark /app /tmp/spark-local /opt/spark/conf
+
+# Скрипты запуска
+COPY scripts/start-spark-master.sh /usr/local/bin/
+COPY scripts/start-spark-worker.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-spark-*.sh
+
+
+ENV SPARK_HOME=/opt/spark \
+    PATH="/opt/spark/bin:/opt/spark/sbin:${PATH}" \
+    PYTHONPATH=/app/src \
+    SPARK_LOCAL_DIRS=/tmp/spark-local \
+    HADOOP_CONF_DIR=/opt/hadoop/conf \
+    PYSPARK_PYTHON=/usr/bin/python3.9 \
+    PYSPARK_DRIVER_PYTHON=/usr/bin/python3.9
+
+WORKDIR /app
+USER spark
+

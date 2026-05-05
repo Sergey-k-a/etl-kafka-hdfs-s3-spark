@@ -1,0 +1,43 @@
+# Данные и логи
+data/
+logs/
+notebooks/
+*.log
+
+# JAR файлы
+jars/
+
+# Плагины Kafka Connect
+kafka-connect-plugins/
+
+# Миграции и временное
+*.md
+!README.md
+
+# Лишние Dockerfile'ы
+Dockerfile
+Dockerfile.datanode
+Dockerfile.namenode
+
+# MinIO данные
+minio-config/
+
+# Виртуальное окружение
+venv/
+__pycache__/
+*.pyc
+
+# Личные заметки (оставить локально)
+kafka-connect.md
+kafka-consumer-groups.md
+README_service.md
+
+# Лишние Dockerfile'ы
+Dockerfile
+Dockerfile.datanode
+Dockerfile.namenode
+
+# Windows bat
+download_jars.bat
+
+git_readme.md
