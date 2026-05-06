@@ -93,8 +93,8 @@ class SilverProcessor:
 
         logger.info(f"Bronze rows: {bronze_count:,}")
 
-        cleaned = self._clean_data(df).persist(StorageLevel.MEMORY_AND_DISK)
-        deduplicate = self._deduplicate(cleaned).persist(StorageLevel.MEMORY_AND_DISK)
+        cleaned = self._clean_data(df)
+        deduplicate = self._deduplicate(cleaned)
         enriched = self._enrich_data(deduplicate).persist(StorageLevel.MEMORY_AND_DISK)
 
         self._save_to_silver(enriched)
