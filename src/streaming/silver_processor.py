@@ -94,7 +94,8 @@ class SilverProcessor:
         logger.info(f"Bronze rows: {bronze_count:,}")
 
         cleaned = self._clean_data(df).persist(StorageLevel.MEMORY_AND_DISK)
-        enriched = self._enrich_data(cleaned).persist(StorageLevel.MEMORY_AND_DISK)
+        deduplicate = self._deduplicate(cleaned).persist(StorageLevel.MEMORY_AND_DISK)
+        enriched = self._enrich_data(deduplicate).persist(StorageLevel.MEMORY_AND_DISK)
 
         self._save_to_silver(enriched)
 
@@ -120,6 +121,15 @@ class SilverProcessor:
             .withColumn("device", lower(trim(col("device"))))
             .withColumn("browser", lower(trim(col("browser"))))
             .withColumn("country", initcap(trim(col("country"))))
+        )
+    
+    def _deduplicate(self, df):
+        window_spec = Window.partitionBy("event_id").orderBy(col("event_timestamp").desc())
+        return (
+            df
+            .withColumn("_row_num", row_number().over(window_spec))
+            .filter(col("_row_num") == 1)
+            .drop("_row_num")
         )
 
     def _enrich_data(self, df):
